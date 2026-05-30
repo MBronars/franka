@@ -14,13 +14,12 @@
          roslaunch <pkg> hand_eye_calibrate_realsense.launch \
              marker_id:=<id> marker_size_cm:=<actual_cm>
 
-       Args
-       ----
+       Args:
        marker_id       Numeric ID encoded in your Alvar marker.  If unknown,
-                       launch without it and `rostopic echo /tf` -- you'll see
-                       `ar_marker_<N>` once the marker is in view.
+                       launch without it and `rostopic echo /tf`; you will
+                       see `ar_marker_<N>` once the marker is in view.
        marker_size_cm  Physical side length (white border included) in CM.
-                       MEASURE YOURS -- 4.6 is just the lab default.
+                       Measure yours; 4.6 is just the lab default.
        ============================================================ -->
 
   <arg name="marker_id"        default="7"/>
