@@ -26,6 +26,8 @@ Controls
   w / s  or  up / down arrow   : +x / -x   (away from / toward the base)
   a / d  or  left / right arrow: +y / -y   (robot's left / right)
   r / f                        : raise / lower the XY plane (+z / -z)
+  + / =                        : take the speed up a notch (1.25x, capped)
+  -                            : take the speed down a notch (1/1.25x)
   o / c                        : open / close the gripper (non-blocking)
   space                        : freeze -- zero all motion, hold position
   q  (or Ctrl-C)               : quit -- stops the skill, restores terminal
@@ -53,8 +55,15 @@ from franka_interface_msgs.msg import SensorDataGroup
 CONTROL_HZ = 50                 # control / publish loop rate
 DT = 1.0 / CONTROL_HZ
 
-SPEED_XY = 0.025                # m/s, end-effector speed in the XY plane
-SPEED_Z = 0.02                  # m/s, speed when raising / lowering the plane
+SPEED_XY = 0.025                # m/s, base end-effector speed in the XY plane
+SPEED_Z = 0.02                  # m/s, base speed when raising / lowering
+
+# Live speed control: `+`/`=` scale up, `-` scales down.  speed_mult starts at
+# 1.0 and is clamped to [SPEED_MULT_MIN, SPEED_MULT_MAX] so the top speed stays
+# safe (SPEED_XY * SPEED_MULT_MAX defines the worst-case command velocity).
+SPEED_STEP = 1.25
+SPEED_MULT_MIN = 0.2
+SPEED_MULT_MAX = 4.0
 
 # How long a key counts as "held" after the last keystroke.  Terminals send
 # repeated characters while a key is held; this must be a bit longer than the
@@ -251,10 +260,12 @@ def main():
         'r': 'zp', 'f': 'zn',
     }
 
+    speed_mult = 1.0
+
     rate = rospy.Rate(CONTROL_HZ)
     last_hud = 0.0
     print('\nTeleop active. Controls: w/a/s/d or arrows = XY, r/f = height, '
-          'o/c = gripper, space = freeze, q = quit.\n')
+          '+/- = speed, o/c = gripper, space = freeze, q = quit.\n')
 
     try:
         with KeyboardReader() as kb:
@@ -275,14 +286,20 @@ def main():
                     elif key == 'c':
                         fa.goto_gripper(GRIPPER_STEP_CLOSE, grasp=True,
                                         block=False)
+                    elif key in ('+', '='):
+                        speed_mult = min(speed_mult * SPEED_STEP,
+                                         SPEED_MULT_MAX)
+                    elif key == '-':
+                        speed_mult = max(speed_mult / SPEED_STEP,
+                                         SPEED_MULT_MIN)
 
                 # --- a key is "held" if pressed recently ----------------
                 def held(name):
                     return (now - last_press[name]) < KEY_TIMEOUT
 
-                vx = SPEED_XY * (held('xp') - held('xn'))
-                vy = SPEED_XY * (held('yp') - held('yn'))
-                vz = SPEED_Z * (held('zp') - held('zn'))
+                vx = SPEED_XY * speed_mult * (held('xp') - held('xn'))
+                vy = SPEED_XY * speed_mult * (held('yp') - held('yn'))
+                vz = SPEED_Z * speed_mult * (held('zp') - held('zn'))
 
                 # --- integrate velocity, then clamp to the safe box -----
                 candidate = target + np.array([vx, vy, vz]) * DT
@@ -319,8 +336,9 @@ def main():
                 if now - last_hud > 0.25:
                     sys.stdout.write(
                         '\rtarget  x={:+.3f}  y={:+.3f}  z={:+.3f}   '
-                        'jmargin={:.2f}   '.format(
-                            target[0], target[1], target[2], margin))
+                        'speed={:.2f}x   jmargin={:.2f}   '.format(
+                            target[0], target[1], target[2],
+                            speed_mult, margin))
                     sys.stdout.flush()
                     last_hud = now
 
