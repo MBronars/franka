@@ -1,0 +1,71 @@
+<launch>
+  <!-- ============================================================
+       Hand-eye calibration (eye-on-base):
+         RealSense2 driver + AR-Alvar tracker + easy_handeye GUI.
+
+       Run separately, in their own terminals:
+         (a)  bash ./bash_scripts/start_control_pc.sh -i <control-pc>
+              ^ frankapy control-PC stack so /tf has panda_link0
+                and panda_end_effector.
+         (b)  python scripts/run_guide_mode.py -t 600
+              ^ gravity-comp free-drive: hand-pose the robot for each sample.
+
+       Then in this terminal:
+         roslaunch <pkg> hand_eye_calibrate_realsense.launch \
+             marker_id:=<id> marker_size_cm:=<actual_cm>
+
+       Args
+       ----
+       marker_id       Numeric ID encoded in your Alvar marker.  If unknown,
+                       launch without it and `rostopic echo /tf` -- you'll see
+                       `ar_marker_<N>` once the marker is in view.
+       marker_size_cm  Physical side length (white border included) in CM.
+                       MEASURE YOURS -- 4.6 is just the lab default.
+       ============================================================ -->
+
+  <arg name="marker_id"        default="7"/>
+  <arg name="marker_size_cm"   default="4.6"/>
+
+  <!-- Default RealSense ROS-driver topic + frame names.  Override only if
+       you've remapped the camera node. -->
+  <arg name="cam_image_topic"   default="/camera/color/image_raw"/>
+  <arg name="cam_info_topic"    default="/camera/color/camera_info"/>
+  <arg name="cam_optical_frame" default="camera_color_optical_frame"/>
+
+  <!-- 1) Bring up the RealSense ROS driver.
+          Point cloud disabled (we don't need it for calibration); depth
+          alignment off for the same reason.  -->
+  <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+    <arg name="enable_pointcloud" value="false"/>
+    <arg name="align_depth"       value="false"/>
+  </include>
+
+  <!-- 2) AR-Alvar tracker.  Publishes a tf for each detected marker:
+          `ar_marker_<id>` expressed in `$(arg cam_optical_frame)`. -->
+  <node name="ar_track_alvar" pkg="ar_track_alvar"
+        type="individualMarkersNoKinect"
+        respawn="false" output="screen">
+    <param name="marker_size"          type="double" value="$(arg marker_size_cm)"/>
+    <param name="max_new_marker_error" type="double" value="0.08"/>
+    <param name="max_track_error"      type="double" value="0.2"/>
+    <param name="output_frame"         type="string" value="$(arg cam_optical_frame)"/>
+    <remap from="camera_image" to="$(arg cam_image_topic)"/>
+    <remap from="camera_info"  to="$(arg cam_info_topic)"/>
+  </node>
+
+  <!-- 3) easy_handeye calibrate.launch
+          eye_on_hand=false  : camera fixed in world, marker on the robot.
+          freehand_robot...   : disables MoveIt sampling; GUI just exposes
+                                "Take sample / Compute / Save".  -->
+  <include file="$(find easy_handeye)/launch/calibrate.launch">
+    <arg name="eye_on_hand"             value="false"/>
+    <arg name="namespace_prefix"        value="franka_realsense_eob"/>
+    <arg name="freehand_robot_movement" value="true"/>
+
+    <arg name="robot_base_frame"     value="panda_link0"/>
+    <arg name="robot_effector_frame" value="panda_end_effector"/>
+
+    <arg name="tracking_base_frame"   value="$(arg cam_optical_frame)"/>
+    <arg name="tracking_marker_frame" value="ar_marker_$(arg marker_id)"/>
+  </include>
+</launch>
